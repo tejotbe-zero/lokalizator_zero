@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lokalizator OSM</title>
+    <title>Lokalizator ZERO TV</title>
 
     <!-- Biblioteka Leaflet (OpenStreetMap) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- Biblioteka MQTT do stabilnego transferu danych -->
+    <!-- Biblioteka MQTT do transferu danych -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
 
     <style>
@@ -65,6 +65,7 @@
     <script>
         let map, marker;
         let client;
+        let wakeLock = null;
 
         // Inicjalizacja mapy OpenStreetMap
         function initMap() {
@@ -78,14 +79,32 @@
 
         initMap();
 
-        // Połączenie ze darmowym brokerem MQTT przez WebSockets (Port 8884 - HTTPS)
+        // Tworzenie ikony autobusu dla odbiornika
+        const busIcon = L.icon({
+            iconUrl: 'bus_ico.png',
+            iconSize: [40, 40],   // Domyślny rozmiar ikony (szerokość, wysokość)
+            iconAnchor: [20, 20], // Punkt zakotwiczenia środka ikony na współrzędnych
+            popupAnchor: [0, -20]
+        });
+
+        // Zapobieganie usypianiu przeglądarki w tle
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {
+                console.log("WakeLock error: " + err.message);
+            }
+        }
+
+        // Połączenie z brokerem MQTT przez WebSockets
         function connectMQTT(onSuccess) {
             const status = document.getElementById('status');
             status.innerText = "Łączenie z serwerem...";
 
             const clientId = 'osm_user_' + Math.random().toString(16).substr(2, 8);
             
-            // Publiczny broker MQTT HiveMQ wspierający bezpieczny WebSocket
             client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
                 clientId: clientId,
                 keepalive: 30
@@ -105,6 +124,33 @@
             });
         }
 
+        // Funkcja do pobierania i wysyłania GPS
+        function sendLocation(topic) {
+            if ('geolocation' in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const data = {
+                            lat: position.coords.latitude,
+                            lng: position.coords.longitude
+                        };
+                        
+                        client.publish(topic, JSON.stringify(data));
+                        
+                        document.getElementById('status').innerText = 
+                            `Wysyłanie pozycji (co 10s): ${data.lat.toFixed(5)}, ${data.lng.toFixed(5)}`;
+                        
+                        updateMarker(data.lat, data.lng, false);
+                    },
+                    (err) => {
+                        console.error("Błąd GPS: " + err.message);
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 9000 }
+                );
+            } else {
+                alert("Brak obsługi GPS w przeglądarce.");
+            }
+        }
+
         // TRYB TELEFON (NADAJNIK)
         function startPhoneMode() {
             const roomId = document.getElementById('roomId').value.trim();
@@ -113,33 +159,18 @@
             document.getElementById('btnPhone').disabled = true;
             document.getElementById('btnPC').disabled = true;
 
+            requestWakeLock();
+
             connectMQTT(() => {
                 const topic = "osm_gps_tracker/" + roomId;
 
-                if ('geolocation' in navigator) {
-                    navigator.geolocation.watchPosition(
-                        (position) => {
-                            const data = {
-                                lat: position.coords.latitude,
-                                lng: position.coords.longitude
-                            };
-                            
-                            // Wysyłanie współrzędnych do serwera
-                            client.publish(topic, JSON.stringify(data));
-                            
-                            document.getElementById('status').innerText = 
-                                `Wysyłanie pozycji: ${data.lat.toFixed(5)}, ${data.lng.toFixed(5)}`;
-                            
-                            updateMarker(data.lat, data.lng);
-                        },
-                        (err) => {
-                            alert("Błąd GPS: " + err.message);
-                        },
-                        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
-                    );
-                } else {
-                    alert("Brak obsługi GPS w przeglądarce.");
-                }
+                // Pierwsze wysłanie natychmiast po połączeniu
+                sendLocation(topic);
+
+                // Rejestracja cyklicznego wysyłania co 10 sekund (10000 ms)
+                setInterval(() => {
+                    sendLocation(topic);
+                }, 10000);
             });
         }
 
@@ -154,19 +185,17 @@
             connectMQTT(() => {
                 const topic = "osm_gps_tracker/" + roomId;
                 
-                // Subskrypcja kanału o podanym ID Pokoju
                 client.subscribe(topic, (err) => {
                     if (!err) {
-                        document.getElementById('status').innerText = "Oczekiwanie na sygnał z telefonu (Pokój: " + roomId + ")...";
+                        document.getElementById('status').innerText = "Oczekiwanie na sygnał (Pokój: " + roomId + ")...";
                     }
                 });
 
-                // Odbieranie danych
                 client.on('message', (receivedTopic, message) => {
                     try {
                         const data = JSON.parse(message.toString());
                         if (data.lat && data.lng) {
-                            updateMarker(data.lat, data.lng);
+                            updateMarker(data.lat, data.lng, true);
                             document.getElementById('status').innerText = 
                                 `Odebrano pozycję: ${data.lat.toFixed(5)}, ${data.lng.toFixed(5)}`;
                         }
@@ -177,13 +206,18 @@
             });
         }
 
-        // Aktualizacja znacznika i widoku mapy
-        function updateMarker(lat, lng) {
+        // Aktualizacja znacznika na mapie
+        function updateMarker(lat, lng, isBusIcon) {
+            const options = isBusIcon ? { icon: busIcon } : {};
+
             if (!marker) {
-                marker = L.marker([lat, lng]).addTo(map);
+                marker = L.marker([lat, lng], options).addTo(map);
                 map.setView([lat, lng], 16);
             } else {
                 marker.setLatLng([lat, lng]);
+                if (isBusIcon) {
+                    marker.setIcon(busIcon);
+                }
                 map.panTo([lat, lng]);
             }
         }
