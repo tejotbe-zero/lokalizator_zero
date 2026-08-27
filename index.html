@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lokalizator ZERO TV</title>
+    <title>Lokalizator ZERO BUS</title>
 
     <!-- Biblioteka Leaflet (OpenStreetMap) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -51,7 +51,7 @@
 <body>
 
     <div id="controls">
-        <label for="roomId">ID Pokoju:</label>
+        <label for="roomId">ID Trasy:</label>
         <input type="text" id="roomId" value="trasa-321-ZERO">
         
         <button id="btnPhone" onclick="startPhoneMode()">Uruchom jako NADAJNIK (Telefon)</button>
@@ -154,7 +154,7 @@
         // TRYB TELEFON (NADAJNIK)
         function startPhoneMode() {
             const roomId = document.getElementById('roomId').value.trim();
-            if(!roomId) return alert("Wpisz ID Pokoju!");
+            if(!roomId) return alert("Wpisz ID Trasy!");
 
             document.getElementById('btnPhone').disabled = true;
             document.getElementById('btnPC').disabled = true;
@@ -177,7 +177,7 @@
         // TRYB PC (ODBIORNIK)
         function startPCMode() {
             const roomId = document.getElementById('roomId').value.trim();
-            if(!roomId) return alert("Wpisz ID Pokoju!");
+            if(!roomId) return alert("Wpisz ID Trasy!");
 
             document.getElementById('btnPhone').disabled = true;
             document.getElementById('btnPC').disabled = true;
@@ -187,7 +187,7 @@
                 
                 client.subscribe(topic, (err) => {
                     if (!err) {
-                        document.getElementById('status').innerText = "Oczekiwanie na sygnał (Pokój: " + roomId + ")...";
+                        document.getElementById('status').innerText = "Oczekiwanie na sygnał (Trasa: " + roomId + ")...";
                     }
                 });
 
